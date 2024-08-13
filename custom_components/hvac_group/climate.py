@@ -703,7 +703,7 @@ class HvacGroupClimateEntity(ClimateEntity, RestoreEntity):
 
                 match self._hvac_mode:
                     case HVACMode.HEAT:
-                        await self._async_turn_off_coolers(pure=True)
+                        await self._async_turn_off_coolers()
                         await self._async_turn_on_heaters()
                     case HVACMode.COOL:
                         await self._async_turn_off_heaters(pure=True)
@@ -713,9 +713,7 @@ class HvacGroupClimateEntity(ClimateEntity, RestoreEntity):
                         await self._async_turn_on_coolers(pure=True)
                     case HVACMode.OFF:
                         await self._async_turn_off_coolers()
-                        await self._async_turn_off_heaters(
-                            pure=True
-                        )  # avoid turning off common elements twice
+                        await self._async_turn_off_heaters(pure=True)
 
             needs_cooling = False
             needs_heating = False
@@ -726,12 +724,18 @@ class HvacGroupClimateEntity(ClimateEntity, RestoreEntity):
             ) or self._target_temperature
             assert self._current_temperature
 
+            # Adjust the threshold checks
+            precision_offset = self.precision / 2
+
+            # Add hysteresis
             too_cold = (
-                self._target_temp_low or self._target_temperature
-            ) >= self._current_temperature
-            too_hot = self._current_temperature >= (
-                self._target_temp_high or self._target_temperature
+                self._current_temperature <= (self._target_temp_low or self._target_temperature) - precision_offset
             )
+            too_hot = (
+                self._current_temperature >= (self._target_temp_high or self._target_temperature) + precision_offset
+            )
+
+            # Handle cooling
             if too_hot and self._coolers:
                 needs_cooling = True
                 if (
@@ -753,8 +757,9 @@ class HvacGroupClimateEntity(ClimateEntity, RestoreEntity):
                     ",".join(self._coolers.keys()),
                     self.entity_id,
                 )
-                await self._async_turn_off_coolers(pure=True)
+                await self._async_turn_off_coolers()
 
+            # Handle heating
             if too_cold and self._heaters:
                 needs_heating = True
                 if (
@@ -844,6 +849,7 @@ class HvacGroupClimateEntity(ClimateEntity, RestoreEntity):
         finally:
             if self._changing_actuators_lock.locked():
                 self._changing_actuators_lock.release()
+
 
     def _update_hvac_modes(self, actuator_type: HvacActuatorType) -> bool:
         """Update the HVAC modes available for the group when a new actuator is loaded.
